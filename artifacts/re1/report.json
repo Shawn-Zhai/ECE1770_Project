@@ -1,0 +1,42 @@
+{
+  "input_dir": "RCAEval\\RE1",
+  "output_dir": "artifacts\\re1",
+  "llm_inputs_dir": "artifacts\\re1\\llm_inputs",
+  "total_case_dirs": 373,
+  "processed_cases": 373,
+  "llm_input_files": 373,
+  "skipped_cases": [],
+  "system_counts": {
+    "online_boutique": 123,
+    "sock_shop": 125,
+    "train_ticket": 125
+  },
+  "fault_counts": {
+    "cpu": 74,
+    "delay": 75,
+    "disk": 75,
+    "loss": 74,
+    "mem": 75
+  },
+  "metric_feature_rows": 40747,
+  "inject_time_corrections": [],
+  "cases_with_nan_fills": 120,
+  "root_service_rank_stats": {
+    "count": 373,
+    "top1": 264,
+    "top3": 341,
+    "top1_rate": 0.707774798927614,
+    "top3_rate": 0.9142091152815014
+  },
+  "parameters": {
+    "baseline_sec": 300,
+    "incident_sec": 300,
+    "top_k_services": 5,
+    "top_k_metrics": 12,
+    "default_inject_offsets_sec": {
+      "ob": 360,
+      "ss": 360,
+      "tt": 480
+    }
+  }
+}

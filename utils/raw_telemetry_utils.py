@@ -171,7 +171,7 @@ def compress_filtered_raw_telemetry(
     max_metrics: int = 6,
     max_points_per_metric: int = 12,
     z_threshold: float = 3.0,
-    min_consecutive_points: int = 10,
+    min_consecutive_points: int = 3,
     smooth_window: int = 3,
 ) -> Dict[str, Any]:
     """
@@ -215,14 +215,7 @@ def compress_filtered_raw_telemetry(
         metric_name = str(metric_name).strip()
         if not metric_name:
             continue
-        
-        for lookup_metric_name, lookup_metric in metric_fact_lookup.items():
-            if metric_name in lookup_metric_name:
-                
-            else:
-                continue
-            
-            
+
         fact = metric_fact_lookup.get(metric_name)
         if not isinstance(fact, dict):
             continue

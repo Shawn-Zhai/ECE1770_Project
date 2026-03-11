@@ -331,9 +331,12 @@ def main() -> None:
 
     compressed_raw_telemetry = compress_filtered_raw_telemetry(
         filtered_raw_telemetry=filtered_raw_telemetry,
+        metric_fact_lookup= lookup_result,
         max_metrics=6,
         max_points_per_metric=12,
+        min_consecutive_points=10
     )
+    
     print_compressed_raw_telemetry(compressed_raw_telemetry)
     
     

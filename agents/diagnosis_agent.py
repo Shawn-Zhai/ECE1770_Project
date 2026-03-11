@@ -704,11 +704,12 @@ class DiagnosisAgent:
         )
 
         return compress_filtered_raw_telemetry(
-            filtered_raw_telemetry=filtered_raw_telemetry,
-            metric_fact_lookup=metric_fact_lookup,
-            max_metrics=6,
-            max_points_per_metric=12,
-        )
+                filtered_raw_telemetry=filtered_raw_telemetry,
+                metric_fact_lookup= metric_fact_lookup,
+                max_metrics=6,
+                max_points_per_metric=12,
+                min_consecutive_points=10
+            )
 
     def _build_service_evidence_summary(
         self,

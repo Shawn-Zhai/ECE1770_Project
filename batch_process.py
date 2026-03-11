@@ -12,7 +12,7 @@ INPUT_FOLDER = PROJECT_ROOT / "dataset" / "artifacts" / "re1" / "llm_inputs"
 RCA_EVAL_RE1_ROOT = PROJECT_ROOT / "dataset" / "RCAEval" / "RE1"
 
 OUTPUT_PATH = Path("diagnosis_batch_results.json")
-MAX_CASES = 10
+MAX_CASES = 5
 
 def load_json(path: Path) -> Any:
     with path.open("r", encoding="utf-8") as f:

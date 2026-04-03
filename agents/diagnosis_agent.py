@@ -1,5 +1,5 @@
 import json
-from typing import Optional, Dict, Any, List, Tuple
+from typing import Optional, Dict, Any, List
 
 from utils.llm_client import create_llm_client
 from config.setting import (
@@ -22,18 +22,19 @@ class DiagnosisAgent:
     Two-stage diagnosis agent.
 
     Stage 1:
-        - Rule-based faulty service localization
-        - Optional LLM refinement for faulty service only
+        - LLM service decision from the stage-1 input by default
+        - Optional rule-based-only fallback path when LLM is disabled
 
     Stage 2:
         - Use stage-1 localized faulty service
         - Filter raw telemetry for that service
         - Compress filtered raw telemetry
-        - Rule-based failure-type scoring
-        - Optional LLM refinement only when needed
+        - LLM failure-type decision from the stage-2 input by default
+        - Optional rule-based-only fallback path when LLM is disabled
     """
 
     ALLOWED_FAILURE_TYPES = {"cpu", "mem", "disk", "delay", "loss", "unknown"}
+    MAX_EVIDENCE_CLAIMS = 3
 
     def __init__(
         self,
@@ -66,22 +67,19 @@ class DiagnosisAgent:
         # -----------------------------
         # Stage 1: localize faulty service
         # -----------------------------
-        stage1_rule_result = self._rule_based_localize_service(state_report)
+        stage1_rule_result = self._empty_stage1_result()
+        stage1_final_result = self._empty_stage1_result()
 
-        stage1_final_result = stage1_rule_result
         if self.use_llm_refinement:
             try:
-                llm_service_result = self._llm_refine_service(
-                    state_report=state_report,
-                    rule_result=stage1_rule_result,
-                )
-                stage1_final_result = self._merge_service_rule_and_llm(
-                    rule_result=stage1_rule_result,
-                    llm_result=llm_service_result,
-                )
+                llm_service_result = self._llm_refine_service(state_report=state_report)
+                stage1_final_result = llm_service_result
             except Exception as e:
-                print(f"ERROR: stage-1 LLM refinement failed: {e}")
-                stage1_final_result = stage1_rule_result
+                print(f"ERROR: stage-1 LLM service decision failed: {e}")
+                stage1_final_result = self._empty_stage1_result()
+        else:
+            stage1_rule_result = self._rule_based_localize_service(state_report)
+            stage1_final_result = stage1_rule_result
 
         # -----------------------------
         # Stage 2: identify failure type
@@ -106,7 +104,7 @@ class DiagnosisAgent:
                     faulty_service=faulty_service,
                 )
 
-                service_evidence_summary = self._build_service_evidence_summary(
+                service_evidence_claims = self._build_service_evidence_claims(
                     state_report=state_report,
                     faulty_service=faulty_service,
                     stage1_result=stage1_final_result,
@@ -129,47 +127,24 @@ class DiagnosisAgent:
                         )[:5000]
                     )
 
-                stage2_rule_result = self._rule_based_identify_failure_type(
-                    faulty_service=faulty_service,
-                    compressed_raw_telemetry=compressed_raw_telemetry,
-                    service_evidence_summary=service_evidence_summary,
-                )
-
-                stage2_final_result = stage2_rule_result
-
-                should_use_llm = (
-                    self.use_llm_refinement
-                    and stage2_rule_result.get("failure_confidence", "low") != "high"
-                )
-
-                if should_use_llm:
+                if self.use_llm_refinement:
                     try:
                         llm_stage2_result = self._llm_identify_failure_type(
                             faulty_service=faulty_service,
-                            service_confidence=stage1_final_result.get(
-                                "service_confidence", "low"
-                            ),
                             compressed_raw_telemetry=compressed_raw_telemetry,
-                            service_evidence_summary=service_evidence_summary,
-                            rule_based_failure_type=stage2_rule_result.get(
-                                "failure_type", "unknown"
-                            ),
-                            rule_based_failure_confidence=stage2_rule_result.get(
-                                "failure_confidence", "low"
-                            ),
-                            rule_based_failure_evidence_summary=stage2_rule_result.get(
-                                "failure_evidence_summary", []
-                            ),
+                            service_evidence_claims=service_evidence_claims,
                         )
-
-                        stage2_final_result = self._merge_failure_rule_and_llm(
-                            rule_result=stage2_rule_result,
-                            llm_result=llm_stage2_result,
-                            compressed_raw_telemetry=compressed_raw_telemetry,
-                        )
+                        stage2_final_result = llm_stage2_result
                     except Exception as e:
-                        print(f"ERROR: stage-2 LLM refinement failed: {e}")
-                        stage2_final_result = stage2_rule_result
+                        print(f"ERROR: stage-2 LLM failure-type decision failed: {e}")
+                        stage2_final_result = self._empty_stage2_result()
+                else:
+                    stage2_rule_result = self._rule_based_identify_failure_type(
+                        faulty_service=faulty_service,
+                        compressed_raw_telemetry=compressed_raw_telemetry,
+                        service_evidence_claims=service_evidence_claims,
+                    )
+                    stage2_final_result = stage2_rule_result
             else:
                 stage2_rule_result = self._empty_stage2_result()
                 stage2_final_result = self._empty_stage2_result()
@@ -181,23 +156,20 @@ class DiagnosisAgent:
 
         final_result = {
             "faulty_service": stage1_final_result.get("faulty_service", "unknown"),
-            "service_confidence": stage1_final_result.get("service_confidence", "low"),
             "failure_type": stage2_final_result.get("failure_type", "unknown"),
-            "failure_confidence": stage2_final_result.get("failure_confidence", "low"),
             "service_scores": stage1_final_result.get("service_scores", {}),
             "top_evidence": stage1_final_result.get("top_evidence", []),
-            "service_evidence_summary": stage2_final_result.get(
-                "service_evidence_summary",
-                stage1_final_result.get("service_evidence_summary", []),
+            "service_evidence_claims": stage2_final_result.get(
+                "service_evidence_claims",
+                stage1_final_result.get("service_evidence_claims", []),
             ),
-            "failure_evidence_summary": stage2_final_result.get(
-                "failure_evidence_summary", []
+            "failure_evidence_claims": stage2_final_result.get(
+                "failure_evidence_claims", []
             ),
             "filtered_raw_telemetry_used": bool(
                 isinstance(filtered_raw_telemetry, dict) and filtered_raw_telemetry
             ),
             "compressed_raw_telemetry": compressed_raw_telemetry,
-            "failure_type_scores": stage2_final_result.get("failure_type_scores", {}),
         }
 
         if logger is not None:
@@ -251,14 +223,15 @@ class DiagnosisAgent:
         )
 
         top_evidence = (service_rows_sorted[:6] + other_rows_sorted[:2])[:8]
-        confidence = self._estimate_service_confidence(ranked_services)
-
         return {
             "faulty_service": best_service,
-            "service_confidence": confidence,
             "service_scores": {k: round(v, 6) for k, v in ranked_services},
             "top_evidence": top_evidence,
-            "service_evidence_summary": self._compact_evidence_summary(top_evidence),
+            "service_evidence_claims": self._build_rule_service_claims(
+                best_service=best_service,
+                service_rows=service_rows_sorted,
+                ranked_services=ranked_services,
+            ),
         }
 
     def _build_scored_rows(self, metric_facts: List[dict]) -> List[Dict[str, Any]]:
@@ -341,43 +314,48 @@ class DiagnosisAgent:
         return service_scores
 
     # ------------------------------------------------------------------
-    # Stage 1: LLM refinement for faulty service only
+    # Stage 1: LLM decision for faulty service
     # ------------------------------------------------------------------
     def _llm_refine_service(
         self,
         state_report: dict,
-        rule_result: dict,
     ) -> Dict[str, Any]:
+        candidate_services = sorted(
+            {
+                str(row.get("service", "")).strip()
+                for row in state_report.get("metric_facts", [])
+                if isinstance(row, dict) and str(row.get("service", "")).strip()
+            }
+        )
         compact_payload = {
             "observed_metric_count": state_report.get("observed_metric_count", 0),
             "data_quality": state_report.get("data_quality", {}),
-            "rule_based_guess": {
-                "faulty_service": rule_result.get("faulty_service", "unknown"),
-                "service_confidence": rule_result.get("service_confidence", "low"),
-                "top_evidence": rule_result.get("top_evidence", [])[:6],
-                "service_scores": rule_result.get("service_scores", {}),
-            },
+            "candidate_services": candidate_services,
             "metric_facts": state_report.get("metric_facts", []),
         }
 
         system_msg = (
             "You are a diagnosis agent for root cause analysis.\n\n"
-            "Your task in this stage is ONLY to refine the faulty service.\n\n"
+            "Your task in this stage is ONLY to decide the faulty service.\n\n"
             "Rules:\n"
             "- Output JSON only.\n"
-            '- Based on the metric facts of the state report and rule_based_guess, refine the guessed faulty service.\n'
-            '- "confidence" must be one of: "high", "medium", "low".\n'
-            '- "service_evidence_summary" must be a JSON array of short strings.\n'
+            '- Use exactly these keys: "faulty_service", "service_evidence_claims".\n'
+            '- "faulty_service" must be one of the candidate services from the input.\n'
+            '- "service_evidence_claims" must be a JSON array with 1 to 3 atomic claim objects.\n'
+            '- Each claim object must use exactly these keys: "id", "text", "type".\n'
+            '- "type" must be "observation" or "inference".\n'
+            '- Each "text" must be one short verifiable statement.\n'
             "- Do NOT predict failure type.\n"
             "- Prefer direct root-cause anomalies over downstream symptoms.\n"
-            "- If uncertain, keep the strongest service candidate from the rule-based result.\n"
+            "- Claims must be non-overlapping and focused on the strongest evidence only.\n"
+            "- Decide from the input evidence itself, not from a prior guess.\n"
             "- Do not include extra keys."
         )
 
         user_msg = (
-            "Structured state report and rule-based service localization result:\n\n"
+            "Structured state report for stage-1 service decision:\n\n"
             f"{json.dumps(compact_payload, indent=2, ensure_ascii=False)}\n\n"
-            "Return service refinement JSON only."
+            "Return service decision JSON only."
         )
 
         resp = self.client.chat.completions.create(
@@ -392,54 +370,13 @@ class DiagnosisAgent:
         raw = resp.choices[0].message.content.strip()
         parsed = json.loads(raw)
 
-        summary = parsed.get("service_evidence_summary", [])
-        if not isinstance(summary, list):
-            summary = []
-
         return {
             "faulty_service": str(parsed.get("faulty_service", "unknown")),
-            "service_confidence": self._normalize_confidence(
-                parsed.get("confidence", "low")
+            "service_evidence_claims": self._normalize_claims(
+                parsed.get("service_evidence_claims", []),
+                prefix="service_claim",
+                default_type="observation",
             ),
-            "service_evidence_summary": [str(x) for x in summary[:8]],
-        }
-
-    def _merge_service_rule_and_llm(
-        self,
-        rule_result: dict,
-        llm_result: dict,
-    ) -> Dict[str, Any]:
-        rule_service = str(rule_result.get("faulty_service", "unknown"))
-        llm_service = str(llm_result.get("faulty_service", "unknown"))
-
-        final_service = rule_service
-        rule_conf = self._normalize_confidence(
-            rule_result.get("service_confidence", "low")
-        )
-
-        if llm_service == rule_service:
-            final_service = rule_service
-        elif rule_conf == "low" and llm_service != "unknown":
-            final_service = llm_service
-
-        final_confidence = rule_result.get("service_confidence", "low")
-        if llm_service == rule_service:
-            final_confidence = self._normalize_confidence(
-                llm_result.get("service_confidence", final_confidence)
-            )
-
-        llm_summary = llm_result.get("service_evidence_summary", [])
-        if not isinstance(llm_summary, list):
-            llm_summary = []
-
-        return {
-            "faulty_service": final_service,
-            "service_confidence": final_confidence,
-            "service_scores": rule_result.get("service_scores", {}),
-            "top_evidence": rule_result.get("top_evidence", []),
-            "service_evidence_summary": llm_summary
-            if llm_summary
-            else rule_result.get("service_evidence_summary", []),
         }
 
     # ------------------------------------------------------------------
@@ -449,40 +386,28 @@ class DiagnosisAgent:
         self,
         faulty_service: str,
         compressed_raw_telemetry: Optional[dict],
-        service_evidence_summary: List[str],
+        service_evidence_claims: List[Dict[str, str]],
     ) -> Dict[str, Any]:
         if not isinstance(compressed_raw_telemetry, dict):
             return {
                 "failure_type": "unknown",
-                "failure_confidence": "low",
-                "failure_type_scores": {},
-                "failure_evidence_summary": [
-                    "No compressed raw telemetry available for failure-type diagnosis."
-                ],
-                "service_evidence_summary": service_evidence_summary[:8],
+                "failure_evidence_claims": [],
+                "service_evidence_claims": service_evidence_claims[: self.MAX_EVIDENCE_CLAIMS],
             }
 
         if compressed_raw_telemetry.get("status") != "ok":
             return {
                 "failure_type": "unknown",
-                "failure_confidence": "low",
-                "failure_type_scores": {},
-                "failure_evidence_summary": [
-                    str(compressed_raw_telemetry.get("instruction_hint", "Weak telemetry evidence."))
-                ],
-                "service_evidence_summary": service_evidence_summary[:8],
+                "failure_evidence_claims": [],
+                "service_evidence_claims": service_evidence_claims[: self.MAX_EVIDENCE_CLAIMS],
             }
 
         events = compressed_raw_telemetry.get("metric_order_by_first_anomaly", [])
         if not isinstance(events, list) or not events:
             return {
                 "failure_type": "unknown",
-                "failure_confidence": "low",
-                "failure_type_scores": {},
-                "failure_evidence_summary": [
-                    "No abnormal metric onset detected for the localized service."
-                ],
-                "service_evidence_summary": service_evidence_summary[:8],
+                "failure_evidence_claims": [],
+                "service_evidence_claims": service_evidence_claims[: self.MAX_EVIDENCE_CLAIMS],
             }
 
         type_scores: Dict[str, float] = {}
@@ -526,84 +451,66 @@ class DiagnosisAgent:
         if not type_scores:
             return {
                 "failure_type": "unknown",
-                "failure_confidence": "low",
-                "failure_type_scores": {},
-                "failure_evidence_summary": [
-                    "Telemetry exists, but no metric could be mapped to a known failure type."
-                ],
-                "service_evidence_summary": service_evidence_summary[:8],
+                "failure_evidence_claims": [],
+                "service_evidence_claims": service_evidence_claims[: self.MAX_EVIDENCE_CLAIMS],
             }
 
         ranked = sorted(type_scores.items(), key=lambda x: x[1], reverse=True)
         best_type = ranked[0][0]
-        s1 = ranked[0][1]
-        s2 = ranked[1][1] if len(ranked) > 1 else 0.0
-
-        margin = s1 / (s2 + 1e-9)
-        if margin >= 2.5:
-            confidence = "high"
-        elif margin >= 1.4:
-            confidence = "medium"
-        else:
-            confidence = "low"
-
         return {
             "failure_type": best_type,
-            "failure_confidence": confidence,
-            "failure_type_scores": {k: round(v, 6) for k, v in ranked},
-            "failure_evidence_summary": evidence[:8],
-            "service_evidence_summary": service_evidence_summary[:8],
+            "failure_evidence_claims": self._normalize_claims(
+                evidence,
+                prefix="failure_claim",
+                default_type="inference",
+            ),
+            "service_evidence_claims": service_evidence_claims[: self.MAX_EVIDENCE_CLAIMS],
         }
 
     # ------------------------------------------------------------------
-    # Stage 2: Optional LLM refinement
+    # Stage 2: Optional LLM decision
     # ------------------------------------------------------------------
     def _llm_identify_failure_type(
         self,
         faulty_service: str,
-        service_confidence: str,
         compressed_raw_telemetry: Optional[dict],
-        service_evidence_summary: List[str],
-        rule_based_failure_type: str,
-        rule_based_failure_confidence: str,
-        rule_based_failure_evidence_summary: List[str],
+        service_evidence_claims: List[Dict[str, str]],
     ) -> Dict[str, Any]:
         compact_payload = {
             "localized_faulty_service": faulty_service,
-            "service_confidence": service_confidence,
-            "service_evidence_summary": service_evidence_summary[:8],
-            "rule_based_failure_guess": {
-                "failure_type": rule_based_failure_type,
-                "failure_confidence": rule_based_failure_confidence,
-                "failure_evidence_summary": rule_based_failure_evidence_summary[:8],
-            },
+            "service_evidence_claims": service_evidence_claims[
+                : self.MAX_EVIDENCE_CLAIMS
+            ],
             "compressed_raw_telemetry": compressed_raw_telemetry or {},
         }
 
         system_msg = (
             "You are a diagnosis agent for root cause analysis.\n\n"
             "The faulty service has already been localized.\n"
-            "Your task in this stage is ONLY to refine the failure type for that chosen service.\n\n"
+            "Your task in this stage is ONLY to decide the failure type for that chosen service.\n\n"
             "Rules:\n"
             "- Output JSON only.\n"
-            '- Use exactly these keys: "failure_type", "confidence", "failure_evidence_summary".\n'
+            '- Use exactly these keys: "failure_type", "failure_evidence_claims".\n'
             '- "failure_type" must be one of: "cpu", "mem", "disk", "delay", "loss", "unknown".\n'
-            '- "confidence" must be one of: "high", "medium", "low".\n'
-            '- "failure_evidence_summary" must be a JSON array of short strings.\n'
+            '- "failure_evidence_claims" must be a JSON array with 1 to 3 atomic claim objects.\n'
+            '- Each claim object must use exactly these keys: "id", "text", "type".\n'
+            '- "type" must be "observation" or "inference".\n'
+            '- Each "text" must be one short verifiable statement.\n'
             "- Do NOT relocalize service.\n"
-            "- Prefer the rule-based failure guess when the telemetry evidence is strong.\n"
             "- Use timestamp order and earliest sustained anomalies as the primary signal.\n"
             "- CPU/mem/disk are direct resource faults.\n"
             "- Persistent latency-dominant degradation maps to delay.\n"
             "- Error-dominant failure or dropped-request symptoms map to loss.\n"
             "- If evidence is weak or ambiguous, output unknown instead of forcing a type.\n"
+            "- Claims must be non-overlapping and limited to the strongest 3 pieces of evidence.\n"
+            "- Decide from the provided stage-2 input itself, not from a prior guess.\n"
             "- Do not include extra keys."
         )
 
         user_msg = (
-            "Narrowed-scope diagnosis input:\n\n"
+            "Narrowed-scope diagnosis input for stage-2 failure-type decision:\n\n"
             f"{json.dumps(compact_payload, indent=2, ensure_ascii=False)}\n\n"
-            "Return failure type diagnosis JSON only."
+            "Return failure type decision JSON only."
         )
 
         resp = self.client.chat.completions.create(
@@ -618,63 +525,15 @@ class DiagnosisAgent:
         raw = resp.choices[0].message.content.strip()
         parsed = json.loads(raw)
 
-        failure_summary = parsed.get("failure_evidence_summary", [])
-        if not isinstance(failure_summary, list):
-            failure_summary = []
-
         return {
             "failure_type": self._normalize_failure_type(
                 parsed.get("failure_type", "unknown")
             ),
-            "failure_confidence": self._normalize_confidence(
-                parsed.get("confidence", "low")
+            "failure_evidence_claims": self._normalize_claims(
+                parsed.get("failure_evidence_claims", []),
+                prefix="failure_claim",
+                default_type="observation",
             ),
-            "failure_evidence_summary": [str(x) for x in failure_summary[:8]],
-        }
-
-    def _merge_failure_rule_and_llm(
-        self,
-        rule_result: dict,
-        llm_result: dict,
-        compressed_raw_telemetry: Optional[dict],
-    ) -> Dict[str, Any]:
-        rule_type = self._normalize_failure_type(rule_result.get("failure_type", "unknown"))
-        llm_type = self._normalize_failure_type(llm_result.get("failure_type", "unknown"))
-
-        rule_conf = self._normalize_confidence(rule_result.get("failure_confidence", "low"))
-        llm_conf = self._normalize_confidence(llm_result.get("failure_confidence", "low"))
-
-        final_type = rule_type
-        final_conf = rule_conf
-
-        if llm_type == rule_type:
-            final_type = rule_type
-            final_conf = max(rule_conf, llm_conf, key=self._confidence_rank)
-        elif rule_conf == "low" and llm_conf in {"medium", "high"} and llm_type != "unknown":
-            final_type = llm_type
-            final_conf = llm_conf
-        else:
-            final_type = rule_type
-            final_conf = rule_conf
-
-        llm_summary = llm_result.get("failure_evidence_summary", [])
-        if not isinstance(llm_summary, list):
-            llm_summary = []
-
-        final_summary = llm_summary if llm_summary else rule_result.get("failure_evidence_summary", [])
-
-        final_conf = self._cap_failure_confidence(
-            confidence=final_conf,
-            compressed_raw_telemetry=compressed_raw_telemetry,
-            failure_evidence_summary=final_summary,
-        )
-
-        return {
-            "failure_type": final_type,
-            "failure_confidence": final_conf,
-            "failure_type_scores": rule_result.get("failure_type_scores", {}),
-            "failure_evidence_summary": final_summary[:8],
-            "service_evidence_summary": rule_result.get("service_evidence_summary", []),
         }
 
     # ------------------------------------------------------------------
@@ -711,29 +570,41 @@ class DiagnosisAgent:
                 min_consecutive_points=10
             )
 
-    def _build_service_evidence_summary(
+    def _build_service_evidence_claims(
         self,
         state_report: dict,
         faulty_service: str,
         stage1_result: dict,
-    ) -> List[str]:
+    ) -> List[Dict[str, str]]:
         try:
             summary = summarize_service_state_evidence(
                 state_report=state_report,
                 service=faulty_service,
-                top_k=8,
+                top_k=6,
             )
             if isinstance(summary, list) and summary:
-                return [str(x) for x in summary[:8]]
+                return self._normalize_claims(
+                    summary,
+                    prefix="service_claim",
+                    default_type="observation",
+                )
         except Exception:
             pass
 
-        existing = stage1_result.get("service_evidence_summary", [])
+        existing = stage1_result.get("service_evidence_claims", [])
         if isinstance(existing, list) and existing:
-            return [str(x) for x in existing[:8]]
+            return self._normalize_claims(
+                existing,
+                prefix="service_claim",
+                default_type="observation",
+            )
 
         top_evidence = stage1_result.get("top_evidence", [])
-        return self._compact_evidence_summary(top_evidence)
+        return self._normalize_claims(
+            self._compact_evidence_summary(top_evidence),
+            prefix="service_claim",
+            default_type="observation",
+        )
 
     # ------------------------------------------------------------------
     # Helpers
@@ -741,19 +612,16 @@ class DiagnosisAgent:
     def _empty_stage1_result(self) -> Dict[str, Any]:
         return {
             "faulty_service": "unknown",
-            "service_confidence": "low",
             "service_scores": {},
             "top_evidence": [],
-            "service_evidence_summary": [],
+            "service_evidence_claims": [],
         }
 
     def _empty_stage2_result(self) -> Dict[str, Any]:
         return {
             "failure_type": "unknown",
-            "failure_confidence": "low",
-            "failure_type_scores": {},
-            "failure_evidence_summary": [],
-            "service_evidence_summary": [],
+            "failure_evidence_claims": [],
+            "service_evidence_claims": [],
         }
 
     def _compact_evidence_summary(self, top_evidence: List[dict]) -> List[str]:
@@ -772,6 +640,97 @@ class DiagnosisAgent:
             )
 
         return summaries
+
+    def _build_rule_service_claims(
+        self,
+        best_service: str,
+        service_rows: List[Dict[str, Any]],
+        ranked_services: List[Any],
+    ) -> List[Dict[str, str]]:
+        claims: List[Any] = []
+
+        for row in service_rows[:2]:
+            claims.append(
+                {
+                    "text": (
+                        f"{best_service}.{row.get('metric_name', 'unknown')} changed "
+                        f"{row.get('direction', 'flat')} with anomaly score "
+                        f"{self._to_float(row.get('anomaly_score', 0.0)):.2f}."
+                    ),
+                    "type": "observation",
+                }
+            )
+
+        if ranked_services:
+            claims.append(
+                {
+                    "text": (
+                        f"{best_service} has the strongest aggregate anomaly signal "
+                        "among the candidate services."
+                    ),
+                    "type": "inference",
+                }
+            )
+
+        return self._normalize_claims(
+            claims,
+            prefix="service_claim",
+            default_type="observation",
+        )
+
+    def _normalize_claims(
+        self,
+        raw_claims: Any,
+        prefix: str,
+        default_type: str = "observation",
+        limit: Optional[int] = None,
+    ) -> List[Dict[str, str]]:
+        if not isinstance(raw_claims, list):
+            return []
+
+        normalized: List[Dict[str, str]] = []
+        seen_texts = set()
+        max_items = self.MAX_EVIDENCE_CLAIMS if limit is None else max(0, int(limit))
+
+        for item in raw_claims:
+            if len(normalized) >= max_items:
+                break
+
+            if isinstance(item, dict):
+                text = str(item.get("text", "")).strip()
+                claim_id = str(item.get("id", "")).strip()
+                claim_type = self._normalize_claim_type(
+                    item.get("type", default_type),
+                    default=default_type,
+                )
+            else:
+                text = str(item).strip()
+                claim_id = ""
+                claim_type = default_type
+
+            if not text:
+                continue
+
+            text_key = text.lower()
+            if text_key in seen_texts:
+                continue
+            seen_texts.add(text_key)
+
+            normalized.append(
+                {
+                    "id": claim_id or f"{prefix}_{len(normalized) + 1}",
+                    "text": text,
+                    "type": claim_type,
+                }
+            )
+
+        return normalized
+
+    def _normalize_claim_type(self, value: Any, default: str = "observation") -> str:
+        text = str(value).strip().lower()
+        if text in {"observation", "inference", "causal"}:
+            return text
+        return default
 
     def _metric_type_weight(self, metric_type: str) -> float:
         metric_type = str(metric_type).lower()
@@ -804,20 +763,6 @@ class DiagnosisAgent:
             return "loss"
         return "unknown"
 
-    def _estimate_service_confidence(self, ranked_services: List[Tuple[str, float]]) -> str:
-        if not ranked_services:
-            return "low"
-
-        s1 = ranked_services[0][1]
-        s2 = ranked_services[1][1] if len(ranked_services) > 1 else 0.0
-        service_margin = s1 / (s2 + 1e-9)
-
-        if service_margin >= 2.5:
-            return "high"
-        if service_margin >= 1.4:
-            return "medium"
-        return "low"
-
     def _normalize_failure_type(self, value: Any) -> str:
         text = str(value).strip().lower()
         if text in self.ALLOWED_FAILURE_TYPES:
@@ -827,36 +772,6 @@ class DiagnosisAgent:
         if text == "error":
             return "loss"
         return "unknown"
-
-    def _normalize_confidence(self, value: Any) -> str:
-        text = str(value).strip().lower()
-        if text in {"high", "medium", "low"}:
-            return text
-        return "low"
-
-    def _confidence_rank(self, conf: str) -> int:
-        order = {"low": 0, "medium": 1, "high": 2}
-        return order.get(str(conf).lower(), 0)
-
-    def _cap_failure_confidence(
-        self,
-        confidence: str,
-        compressed_raw_telemetry: Optional[dict],
-        failure_evidence_summary: List[str],
-    ) -> str:
-        level = self._confidence_rank(confidence)
-        max_level = 2
-
-        if not isinstance(compressed_raw_telemetry, dict):
-            max_level = min(max_level, 0)
-        elif compressed_raw_telemetry.get("status") != "ok":
-            max_level = min(max_level, 0)
-
-        if not failure_evidence_summary:
-            max_level = min(max_level, 1)
-
-        rev = {0: "low", 1: "medium", 2: "high"}
-        return rev[min(level, max_level)]
 
     def _safe_z(self, delta: float, sigma: float) -> float:
         if sigma < 1e-9:

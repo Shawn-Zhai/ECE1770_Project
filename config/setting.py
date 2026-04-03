@@ -4,7 +4,7 @@ import os
 # "openai"  -> use OpenAI cloud API
 BACKEND = os.getenv("AGENTIC_BACKEND", "openai")
 
-OPENAI_MODEL_NAME = "gpt-5-mini"  
+OPENAI_MODEL_NAME = "gpt-5.4"  
 SPECIFIED_MODEL_NAME = ""
 
 # Unified model name the rest of the code uses

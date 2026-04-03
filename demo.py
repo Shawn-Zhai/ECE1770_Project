@@ -226,31 +226,28 @@ def print_prediction_details(prediction: Dict[str, Any]) -> None:
     pretty_print_header("Diagnosis Key Fields")
     print(f"faulty_service             : {prediction.get('faulty_service')}")
     print(f"failure_type               : {prediction.get('failure_type')}")
-    print(f"service_confidence         : {prediction.get('service_confidence')}")
-    print(f"failure_confidence         : {prediction.get('failure_confidence')}")
     print(f"filtered_raw_telemetry_used: {prediction.get('filtered_raw_telemetry_used')}")
 
-    service_summary = prediction.get("service_evidence_summary", [])
-    failure_summary = prediction.get("failure_evidence_summary", [])
-    failure_type_scores = prediction.get("failure_type_scores", {})
+    service_claims = prediction.get("service_evidence_claims", [])
+    failure_claims = prediction.get("failure_evidence_claims", [])
 
-    print("\nservice_evidence_summary:")
-    if isinstance(service_summary, list) and service_summary:
-        for i, item in enumerate(service_summary, start=1):
-            print(f"  {i}. {item}")
+    print("\nservice_evidence_claims:")
+    if isinstance(service_claims, list) and service_claims:
+        for i, item in enumerate(service_claims, start=1):
+            if isinstance(item, dict):
+                print(f"  {i}. [{item.get('type', 'observation')}] {item.get('text', '')}")
+            else:
+                print(f"  {i}. {item}")
     else:
         print("  <empty>")
 
-    print("\nfailure_evidence_summary:")
-    if isinstance(failure_summary, list) and failure_summary:
-        for i, item in enumerate(failure_summary, start=1):
-            print(f"  {i}. {item}")
-    else:
-        print("  <empty>")
-
-    print("\nfailure_type_scores:")
-    if isinstance(failure_type_scores, dict) and failure_type_scores:
-        print(json.dumps(failure_type_scores, indent=2, ensure_ascii=False))
+    print("\nfailure_evidence_claims:")
+    if isinstance(failure_claims, list) and failure_claims:
+        for i, item in enumerate(failure_claims, start=1):
+            if isinstance(item, dict):
+                print(f"  {i}. [{item.get('type', 'observation')}] {item.get('text', '')}")
+            else:
+                print(f"  {i}. {item}")
     else:
         print("  <empty>")
 

@@ -1,1 +1,4 @@
 /dataset/RCAEval/RE2/
+/dataset/RCAEval/RE2_SS/
+*__pycache__*
+/dataset/artifacts/

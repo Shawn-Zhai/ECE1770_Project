@@ -155,10 +155,8 @@ def evaluate_prediction(
         "gt_fault": gt_fault,
         "fault_correct": fault_ok,
         "joint_correct": joint_ok,
-        "service_confidence": prediction.get("service_confidence", "low"),
-        "failure_confidence": prediction.get("failure_confidence", "low"),
-        "service_evidence_summary": prediction.get("service_evidence_summary", []),
-        "failure_evidence_summary": prediction.get("failure_evidence_summary", []),
+        "service_evidence_claims": prediction.get("service_evidence_claims", []),
+        "failure_evidence_claims": prediction.get("failure_evidence_claims", []),
         "filtered_raw_telemetry_used": prediction.get(
             "filtered_raw_telemetry_used", False
         ),

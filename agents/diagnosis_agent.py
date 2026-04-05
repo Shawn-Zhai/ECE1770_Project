@@ -17,6 +17,19 @@ from utils.raw_telemetry_utils import (
 )
 
 
+INTERNAL_EVIDENCE_PATTERNS = (
+    "decision_score",
+    "direct_metric_score",
+    "type discriminator",
+    "discriminator summary",
+    "behavior override",
+    "top hypothesis",
+    "normalized signal score",
+    "family decision score",
+    "anomaly score",
+)
+
+
 class DiagnosisAgent:
     """
     Two-stage diagnosis agent.
@@ -347,6 +360,10 @@ class DiagnosisAgent:
             '- Each "text" must be one short verifiable statement.\n'
             "- Do NOT predict failure type.\n"
             "- Prefer direct root-cause anomalies over downstream symptoms.\n"
+            "- Evidence claims must cite telemetry facts or simple statistics that can be computed "
+            "from raw telemetry, such as means, peaks, counts, p95, onset timing, or dropped volume.\n"
+            "- Do not mention internal reasoning artifacts in evidence claims, including decision "
+            "scores, anomaly scores, discriminators, rankings, top hypotheses, or behavior overrides.\n"
             "- Claims must be non-overlapping and focused on the strongest evidence only.\n"
             "- Decide from the input evidence itself, not from a prior guess.\n"
             "- Do not include extra keys."
@@ -498,6 +515,10 @@ class DiagnosisAgent:
             '- Each "text" must be one short verifiable statement.\n'
             "- Do NOT relocalize service.\n"
             "- Use timestamp order and earliest sustained anomalies as the primary signal.\n"
+            "- Evidence claims must cite telemetry facts or simple statistics that can be computed "
+            "from raw telemetry, such as means, peaks, counts, p95, onset timing, or dropped volume.\n"
+            "- Do not mention internal reasoning artifacts in evidence claims, including decision "
+            "scores, anomaly scores, discriminators, rankings, top hypotheses, or behavior overrides.\n"
             "- CPU/mem/disk are direct resource faults.\n"
             "- Persistent latency-dominant degradation maps to delay.\n"
             "- Error-dominant failure or dropped-request symptoms map to loss.\n"
@@ -631,12 +652,18 @@ class DiagnosisAgent:
             service = str(row.get("service", "unknown"))
             metric_name = str(row.get("metric_name", "unknown"))
             direction = str(row.get("direction", "flat"))
-            anomaly_score = self._to_float(row.get("anomaly_score", 0.0))
-            change_ratio = self._to_float(row.get("change_ratio", 0.0))
+            baseline_mean = self._to_float(row.get("baseline_mean", 0.0))
+            incident_mean = self._to_float(row.get("incident_mean", 0.0))
+            first_offset = row.get("first_incident_offset_sec")
 
+            offset_text = (
+                f", starting {int(self._to_float(first_offset))}s after injection"
+                if first_offset is not None
+                else ""
+            )
             summaries.append(
-                f"{service}.{metric_name} changed {direction} "
-                f"(anomaly={anomaly_score:.2f}, ratio={change_ratio:.2f})"
+                f"{service}.{metric_name} moved {direction} from {baseline_mean:.3f} "
+                f"to {incident_mean:.3f}{offset_text}."
             )
 
         return summaries
@@ -653,9 +680,10 @@ class DiagnosisAgent:
             claims.append(
                 {
                     "text": (
-                        f"{best_service}.{row.get('metric_name', 'unknown')} changed "
-                        f"{row.get('direction', 'flat')} with anomaly score "
-                        f"{self._to_float(row.get('anomaly_score', 0.0)):.2f}."
+                        f"{best_service}.{row.get('metric_name', 'unknown')} moved "
+                        f"{row.get('direction', 'flat')} from "
+                        f"{self._to_float(row.get('baseline_mean', 0.0)):.3f} to "
+                        f"{self._to_float(row.get('incident_mean', 0.0)):.3f}."
                     ),
                     "type": "observation",
                 }
@@ -710,6 +738,8 @@ class DiagnosisAgent:
 
             if not text:
                 continue
+            if self._is_internal_evidence_claim(text):
+                continue
 
             text_key = text.lower()
             if text_key in seen_texts:
@@ -731,6 +761,10 @@ class DiagnosisAgent:
         if text in {"observation", "inference", "causal"}:
             return text
         return default
+
+    def _is_internal_evidence_claim(self, text: str) -> bool:
+        lowered = str(text).strip().lower()
+        return any(pattern in lowered for pattern in INTERNAL_EVIDENCE_PATTERNS)
 
     def _metric_type_weight(self, metric_type: str) -> float:
         metric_type = str(metric_type).lower()

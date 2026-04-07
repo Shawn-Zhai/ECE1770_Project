@@ -3,17 +3,12 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from agents.diagnosis_agent import DiagnosisAgent
+from agents.diagnosis_agent_re1_v2 import DiagnosisAgent
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 
-INPUT_FOLDER = PROJECT_ROOT / "dataset" / "artifacts" / "re1" / "llm_inputs"
-OUTPUT_PATH = PROJECT_ROOT / "re1_diagnosis_all_results.json"
-
-
-# ------------------------
-# Utils
-# ------------------------
+INPUT_FOLDER = PROJECT_ROOT / "dataset" / "artifacts" / "re1" / "llm_inputs_v2"
+OUTPUT_PATH = PROJECT_ROOT / "re1_diagnosis_all_results_v2.json"
 
 def load_json(path: Path) -> Any:
     with path.open("r", encoding="utf-8") as f:

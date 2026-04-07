@@ -1,0 +1,78 @@
+{
+  "summary": {
+    "total": 2,
+    "service_acc": 0.9061662198391421,
+    "fault_acc": 0.4584450402144772,
+    "joint_acc": 0.4450402144772118
+  },
+  "by_fault_type": {
+    "cpu": {
+      "cases": 74,
+      "service_correct": 72,
+      "fault_correct": 64,
+      "both_right": 62
+    },
+    "delay": {
+      "cases": 75,
+      "service_correct": 73,
+      "fault_correct": 68,
+      "both_right": 67
+    },
+    "disk": {
+      "cases": 75,
+      "service_correct": 66,
+      "fault_correct": 19,
+      "both_right": 18
+    },
+    "loss": {
+      "cases": 74,
+      "service_correct": 53,
+      "fault_correct": 1,
+      "both_right": 0
+    },
+    "mem": {
+      "cases": 75,
+      "service_correct": 74,
+      "fault_correct": 19,
+      "both_right": 19
+    }
+  },
+  "results": [
+    {
+      "case_id": "re1ob_adservice_cpu_1",
+      "service_correct": true,
+      "fault_correct": true,
+      "joint_correct": true,
+      "gt_failure_type": "cpu",
+      "prediction": {
+        "faulty_service": "adservice",
+        "failure_type": "cpu",
+        "failure_evidence": "Stage 1 - faulty service: adservice has the strongest anomaly by far: adservice_cpu increased by 5160.487317367362%, which is vastly larger than any other reported percent change. The next largest change is only 12.26868524657257% for cartservice_latency. adservice also appears again with smaller positive changes in adservice_mem (4.798430498824464%) and adservice_load (1.537661011470811%), reinforcing that adservice is the most suspicious service based on the provided metric facts. Stage 2 - failure type: CPU shows an extremely large percent change of 5160.487317367362, while memory changes only 4.798430498824464, load changes 1.537661011470811, and latency changes 0.6676752281244459. CPU is clearly the dominant anomaly and no p50/p90 latency pattern is provided for disk or delay."
+      }
+    },
+    {
+      "case_id": "re1ob_adservice_cpu_2",
+      "service_correct": true,
+      "fault_correct": true,
+      "joint_correct": true,
+      "gt_failure_type": "cpu",
+      "prediction": {
+        "faulty_service": "adservice",
+        "failure_type": "cpu",
+        "failure_evidence": "Stage 1 - faulty service: adservice is the most suspicious because it has by far the largest percentage anomaly in the report: adservice_cpu increased by 5315.27839038015%, which is dramatically larger than all other listed changes. The next largest changes are only around 13% in magnitude. adservice also has additional abnormal metrics (adservice_mem +4.840911175585922% and adservice_latency +2.2419628353926324%), reinforcing that this service is anomalous. Based on the decision rule to prioritize the strongest anomaly and especially the largest percentage change, adservice is the faulty service. Stage 2 - failure type: CPU shows an exceptionally large increase of 5315.27839038015%, which is overwhelmingly larger than memory (4.840911175585922%), latency (2.2419628353926324%), and load (0.5131038955055652%). This makes CPU the dominant anomaly."
+      }
+    },
+    {
+      "case_id": "re1ob_adservice_cpu_3",
+      "service_correct": true,
+      "fault_correct": true,
+      "joint_correct": true,
+      "gt_failure_type": "cpu",
+      "prediction": {
+        "faulty_service": "adservice",
+        "failure_type": "cpu",
+        "failure_evidence": "Stage 1 - faulty service: adservice has the strongest anomaly by far: adservice_cpu increased by 5327.345920760943%, which is vastly larger than any other percent change in the report. The next largest change is frontend-external_error at -100.0%, far smaller in magnitude. adservice also shows a secondary anomaly in adservice_mem at 5.723809041281654%, reinforcing suspicion on the same service. Based on the decision rule to prioritize the largest percentage change for localization, adservice is the most suspicious service. Stage 2 - failure type: CPU shows an extremely large increase of 5327.345920760943%, which is the dominant anomaly by far. Memory changes only 5.723809041281654%, load decreases slightly by -1.9748296574106907%, and latency changes only 0.29042263633664733%, so CPU is clearly the main abnormal metric."
+      }
+    }
+  ]
+}

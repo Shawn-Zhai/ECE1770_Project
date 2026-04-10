@@ -1,4 +1,5 @@
 import json
+import re
 from typing import Optional, Dict, Any, List
 
 from utils.llm_client import create_llm_client
@@ -385,7 +386,7 @@ class DiagnosisAgent:
         )
 
         raw = resp.choices[0].message.content.strip()
-        parsed = json.loads(raw)
+        parsed = self._parse_llm_json_content(raw)
 
         return {
             "faulty_service": str(parsed.get("faulty_service", "unknown")),
@@ -544,7 +545,7 @@ class DiagnosisAgent:
         )
 
         raw = resp.choices[0].message.content.strip()
-        parsed = json.loads(raw)
+        parsed = self._parse_llm_json_content(raw)
 
         return {
             "failure_type": self._normalize_failure_type(
@@ -755,6 +756,64 @@ class DiagnosisAgent:
             )
 
         return normalized
+
+    def _parse_llm_json_content(self, raw: str) -> Dict[str, Any]:
+        text = str(raw).strip()
+        if not text:
+            raise ValueError("Empty LLM response.")
+
+        try:
+            parsed = json.loads(text)
+            if isinstance(parsed, dict):
+                return parsed
+        except Exception:
+            pass
+
+        fenced_match = re.search(
+            r"```(?:json)?\s*(\{.*?\}|\[.*?\])\s*```",
+            text,
+            re.DOTALL | re.IGNORECASE,
+        )
+        if fenced_match:
+            candidate = fenced_match.group(1).strip()
+            parsed = json.loads(candidate)
+            if isinstance(parsed, dict):
+                return parsed
+
+        starts = [idx for idx, ch in enumerate(text) if ch in "{["]
+        for start in starts:
+            opener = text[start]
+            closer = "}" if opener == "{" else "]"
+            depth = 0
+            in_string = False
+            escape = False
+            for end in range(start, len(text)):
+                ch = text[end]
+                if in_string:
+                    if escape:
+                        escape = False
+                    elif ch == "\\":
+                        escape = True
+                    elif ch == '"':
+                        in_string = False
+                    continue
+
+                if ch == '"':
+                    in_string = True
+                elif ch == opener:
+                    depth += 1
+                elif ch == closer:
+                    depth -= 1
+                    if depth == 0:
+                        candidate = text[start : end + 1]
+                        try:
+                            parsed = json.loads(candidate)
+                            if isinstance(parsed, dict):
+                                return parsed
+                        except Exception:
+                            break
+
+        raise ValueError(f"Could not parse JSON object from LLM response: {text[:300]}")
 
     def _normalize_claim_type(self, value: Any, default: str = "observation") -> str:
         text = str(value).strip().lower()

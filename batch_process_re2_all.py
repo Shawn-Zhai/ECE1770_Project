@@ -191,10 +191,20 @@ def main() -> None:
         ground_truth = extract_ground_truth_from_case_id(case_id)
         state_report = load_json(file_path)
 
-        prediction = agent.diagnose(
-            state_report=state_report,
-            raw_telemetry=None,
-        )
+        try:
+            prediction = agent.diagnose(
+                state_report=state_report,
+                raw_telemetry=None,
+            )
+        except Exception as exc:
+            print(f"ERROR: case-level diagnosis failed: {exc}")
+            prediction = {
+                "faulty_service": "unknown",
+                "failure_type": "unknown",
+                "service_evidence_claims": [],
+                "failure_evidence_claims": [],
+                "error": str(exc),
+            }
 
         result_item = evaluate_prediction(case_id, prediction, ground_truth)
         results.append(result_item)

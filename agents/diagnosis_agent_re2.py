@@ -607,7 +607,7 @@ class DiagnosisAgentRE2(DiagnosisAgent):
         )
 
         raw = resp.choices[0].message.content.strip()
-        parsed = json.loads(raw)
+        parsed = self._parse_llm_json_content(raw)
 
         llm_type = self._coerce_failure_type(
             value=parsed.get("failure_type", ""),
